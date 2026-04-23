@@ -25,8 +25,8 @@ def generate_dummy_logs(
         bool, typer.Argument(help="logs to be used for validation")
     ] = False,
 ):
-    """Logs will be generated under <project_root>/synthetic. Three sets of logs anchors_(train|valid).csv, positives_(train|valid).csv,
-    and negatives_(train|valid).csv will be generated. Size of each batch is 10 log lines and total number of log lines will be 10 * batch_count.
+    """Generate synthetic logs. The logs will be generated under <project_root>/synthetic. Three sets of logs: anchors_(train|valid).csv, positives_(train|valid).csv,
+    and negatives_(train|valid).csv will be generated. Size of each batch will be 10 and total number of log lines will be 10 * batch_count.
     """
     generate_synthetic_logs(batch_count, for_validation)
 
@@ -41,8 +41,8 @@ def train_model(
     ] = None,
 ):
     """Train the model using the training and validation log samples available under <project_root>/synthetic. State of the trained model and
-    other related configuration will be saved under specified state_root_dir, if one is specified. If no directory is specified the trained model state
-    and related configuration will be saved under <project_root>/saved_states.
+    other learned parameters will be saved under specified state_root_dir, if one is specified. If no directory is specified the trained model state
+    and related parameters will be saved under <project_root>/saved_states.
     """
     if state_root_dir is None:
         state_root_dir = get_root_directory()
@@ -65,8 +65,8 @@ def infer(
     ] = None,
 ):
     """Run inference on the batch of logs contained in given file path. The inference will be run on batch of 10 logs at a time, and classification result will be on each batch (of 10) logs.
-    State of the trained model and other related configuration will be loaded from specified state_root_dir, if one is specified. If no directory is specified the trained model state
-    and related configuration will be loaded from <project_root>/saved_states."""
+    State of the trained model and other necessary parameters will be loaded from specified state_root_dir, if one is specified. If no directory is specified the trained model state
+    and related parameters will be loaded from <project_root>/saved_states."""
     file_path = file_path.strip()
 
     if state_root_dir is None:

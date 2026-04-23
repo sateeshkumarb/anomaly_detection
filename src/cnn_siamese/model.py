@@ -83,7 +83,7 @@ class SiameseNetwork(nn.Module):
         return self.embedding_network(x)
 
 
-def save_golden_ratios(model, golden_dataloader, dir_to_save_state):
+def save_golden_ratios(model:torch.nn.Module, golden_dataloader:torch.utils.data.DataLoader, dir_to_save_state:str):
     model.eval()
 
     running_sum = None
@@ -207,7 +207,7 @@ def infer(state_root_dir: str, file_paths: typing.List[str]) -> None:
             )
 
 
-def get_prediction(dist, mu, threshold):
+def get_prediction(dist:float, mu:float, threshold:float) -> float:
     # If distance is near or below the mean, probability is near 0
     if dist <= mu:
         return 0.0
@@ -226,13 +226,3 @@ def get_prediction(dist, mu, threshold):
     # 0.5) or check if your mu is too low (TODO)
     prob = 1 - torch.exp(-0.7 * scaled_dist)  # 0.7 is a tuning constant (sensitivity)
     return prob.item()
-
-
-if __name__ == "__main__":
-    model_path = "saved_state/siamese_cnn_model.pth"
-    train(model_path)
-    # file_paths = ["data/negatives_test.csv","data/positives_test.csv","data/mixed.csv"]
-    file_paths = ["data/positives_test.csv"]
-    # file_paths = ["data/t1.csv"]
-    # file_paths = ["data/negatives_test.csv"]
-    # infer(model_path, file_paths)
