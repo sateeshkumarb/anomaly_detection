@@ -225,7 +225,7 @@ def create_balanced_triplets(n_triplets=1000):
     return triplets
 
 
-def generate_synthetic_logs(batch_count, train=True):
+def generate_synthetic_logs(batch_count, validation=False):
     dataset = create_balanced_triplets(batch_count)
     anchors = []
     positives = []
@@ -235,18 +235,19 @@ def generate_synthetic_logs(batch_count, train=True):
         positives.extend(d["positive"])
         negatives.extend(d["negative"])
 
-    if train:
-        file_path_mapping = {
-            "anchors": (anchors, ANCHOR_FILE_PATH_TRAIN),
-            "positive": (positives, POSITIVE_FILE_PATH_TRAIN),
-            "negative": (negatives, NEGATIVE_FILE_PATH_TRAIN),
-        }
-    else:
+    if validation:
         file_path_mapping = {
             "anchors": (anchors, ANCHOR_FILE_PATH_VALID),
             "positive": (positives, POSITIVE_FILE_PATH_VALID),
             "negative": (negatives, NEGATIVE_FILE_PATH_VALID),
         }
+    else:
+        file_path_mapping = {
+            "anchors": (anchors, ANCHOR_FILE_PATH_TRAIN),
+            "positive": (positives, POSITIVE_FILE_PATH_TRAIN),
+            "negative": (negatives, NEGATIVE_FILE_PATH_TRAIN),
+        }
+
 
     for v in file_path_mapping.values():
         dfp = pd.DataFrame(v[0])
