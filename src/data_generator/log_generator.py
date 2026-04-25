@@ -1,3 +1,5 @@
+from typing import List
+
 import pandas as pd
 import random
 import time
@@ -10,17 +12,77 @@ from common.constants import (
     NORMAL_LEVELS,
     ANCHOR_FILE_PATH_TRAIN,
     POSITIVE_FILE_PATH_TRAIN,
-    NEGATIVE_FILE_PATH_TRAIN,
+    NEGATIVE_FILE_PATH_TRAIN_0,
+    NEGATIVE_FILE_PATH_TRAIN_1,
+    NEGATIVE_FILE_PATH_TRAIN_2,
+    NEGATIVE_FILE_PATH_TRAIN_3,
     ANCHOR_FILE_PATH_VALID,
     POSITIVE_FILE_PATH_VALID,
     NEGATIVE_FILE_PATH_VALID,
 )
+
+ANOMALY_SUB_TYPE_EASY = {
+    "front_loaded":          0.35,
+    "back_loaded":           0.35,
+    "middle": 0.15,
+    "triple": 0.15,
+    "spread":                0.00,  # highest weight — outliers
+    "boundary_time":         0.00,  # boundary cases
+    "multi_comp_distractor": 0.00,
+}
+
+ANOMALY_SUB_TYPE_MEDIUM = {
+    "front_loaded":          0.25,
+    "back_loaded":           0.25,
+    "middle": 0.10,
+    "triple": 0.10,
+    "spread":                0.25,  # highest weight — outliers
+    "boundary_time":         0.00,  # boundary cases
+    "multi_comp_distractor": 0.05,
+}
+
+ANOMALY_SUB_TYPE_HARD = {
+    "front_loaded":          0.15,
+    "back_loaded":           0.15,
+    "middle": 0.05,
+    "triple": 0.05,
+    "spread":                0.30,
+    "boundary_time":         0.20,  # boundary cases
+    "multi_comp_distractor": 0.10,
+}
+
+ANOMALY_SUB_TYPE_EXTREME = {
+    "front_loaded":          0.10,
+    "back_loaded":           0.10,
+    "middle": 0.03,
+    "triple": 0.02,
+    "spread":                0.35,
+    "boundary_time":         0.25,  # boundary cases
+    "multi_comp_distractor": 0.15,
+}
+
+ANOMALY_SUB_TYPE_FOR_VALIDATION = {
+    "front_loaded":          0.15,
+    "back_loaded":           0.15,
+    "middle": 0.15,
+    "triple": 0.15,
+    "spread":                0.15,
+    "boundary_time":         0.15,  # boundary cases
+    "multi_comp_distractor": 0.10,
+}
+
+
+
+
+
 
 
 class SyntheticLogGenerator:
     def __init__(self, start_time=None):
         if start_time is None:
             self.last_ts = time.time()
+        else:
+            self.last_ts = start_time
 
         self.batch_gap = (
             600.0  # 10 mins gap between windows to prevent cross-batch alerts
@@ -38,9 +100,6 @@ class SyntheticLogGenerator:
         pattern_start = random.randint(0, WINDOW_SIZE - 2)
         seen_comps = {}
         prev_comp = None
-        max_anomalies_count = random.choices(range(2, 7))[0]
-        anomaly_count = 0
-        prev_anomaly_loc = None
 
         for i in range(WINDOW_SIZE):
             # 1. SET DEFAULT "BACKGROUND NOISE" VALUES
@@ -128,63 +187,135 @@ class SyntheticLogGenerator:
                 logs.append(
                     {"timestamp": current_time, "component": comp, "level": lvl}
                 )
-            elif scenario == "anomaly":
-                # Rule: THE TRIGGER - Two are more high-severity logs, SAME component within 300s
-                # within the batch. Not necessarily successive
-                # even when error level is non-severe keeping gap < 299 so that when sorted
-                # logs with severe level aren't always pused to the end
-                gap = random.uniform(1.0, 299.0)
-                if i == pattern_start:
-                    lvl = random.choices(ERROR_LEVELS)[0]
-                    comp = target_comp
-                    anomaly_count += 1
-                    prev_anomaly_loc = i
-                else:
-                    random_locs = [k for k in range(i + 1) if k != pattern_start]
-                    v = random.randint(0, 1)
-                    # randomly insert error severity log at start
-                    if len(random_locs) == 1 and v:
-                        lvl = random.choices(ERROR_LEVELS)[0]
-                        comp = target_comp
-                        anomaly_count += 1
-                        prev_anomaly_loc = i
+            elif scenario == "anomaly_easy":
+                sub_type = random.choices(
+                    list(ANOMALY_SUB_TYPE_EASY.keys()),
+                    weights=list(ANOMALY_SUB_TYPE_EASY.values())
+                )[0]
+                return self._generate_anomaly_window(sub_type)
+            elif scenario == "anomaly_medium":
+                sub_type = random.choices(
+                    list(ANOMALY_SUB_TYPE_MEDIUM.keys()),
+                    weights=list(ANOMALY_SUB_TYPE_MEDIUM.values())
+                )[0]
+                return self._generate_anomaly_window(sub_type)
+            elif scenario == "anomaly_hard":
+                sub_type = random.choices(
+                    list(ANOMALY_SUB_TYPE_HARD.keys()),
+                    weights=list(ANOMALY_SUB_TYPE_HARD.values())
+                )[0]
+                return self._generate_anomaly_window(sub_type)
+            elif scenario == "anomaly_extreme":
+                sub_type = random.choices(
+                    list(ANOMALY_SUB_TYPE_EXTREME.keys()),
+                    weights=list(ANOMALY_SUB_TYPE_EXTREME.values())
+                )[0]
+                return self._generate_anomaly_window(sub_type)
+            elif scenario == "anomaly_for_validation":
+                sub_type = random.choices(
+                    list(ANOMALY_SUB_TYPE_FOR_VALIDATION.keys()),
+                    weights=list(ANOMALY_SUB_TYPE_FOR_VALIDATION.values())
+                )[0]
+                return self._generate_anomaly_window(sub_type)
 
-                    # randomizing so that next error level for same comp can come anywhere in the batch
-                    if (
-                        len(random_locs) > 1
-                        and random.choice(random_locs) == i
-                        and anomaly_count <= max_anomalies_count
-                    ):
-                        # ensure that we don't have logs with two error levels adjacent to each other all the time
-                        if prev_anomaly_loc is None or (
-                            prev_anomaly_loc + 1 == i and v
-                        ):
-                            lvl = random.choice(ERROR_LEVELS)
-                            comp = target_comp
-                            anomaly_count += 1
-                            prev_anomaly_loc = i
-
-                    # if we haven't added requisite anomalies till end of loop add one.
-                    if i == (WINDOW_SIZE - 1) and anomaly_count <= max_anomalies_count:
-                        lvl = random.choice(ERROR_LEVELS)
-                        comp = target_comp
-                        anomaly_count += 1
-                        prev_anomaly_loc = i
-
-                current_time += gap
-                logs.append(
-                    {"timestamp": current_time, "component": comp, "level": lvl}
-                )
-            elif scenario == "single_comp_errors":
-                # all logs from same component are of type ERROR
-                gap = random.uniform(1.0, 299.0)
-                lvl = random.choice(ERROR_LEVELS)
-                current_time += gap
-                logs.append(
-                    {"timestamp": current_time, "component": target_comp, "level": lvl}
-                )
 
         self.last_ts = current_time
+        return logs
+
+    def _generate_anomaly_window(self, sub_type: str) -> List[dict]:
+        """
+        Each sub_type handles one specific anomaly pattern cleanly.
+        Background noise logs are always interspersed to reflect reality.
+        """
+        logs = [None] * WINDOW_SIZE
+        current_time = self.last_ts + self.batch_gap
+        target_comp = random.choice(COMPONENTS)
+        other_comps = [c for c in COMPONENTS if c != target_comp]
+
+        # --- 1. Decide WHERE the violating events go in the batch ---
+        if sub_type == "front_loaded":
+            # Violations early in batch
+            violation_positions = sorted(random.sample(range(0, 4), 2))
+
+        elif sub_type == "back_loaded":
+            # Violations late in batch
+            violation_positions = sorted(random.sample(range(6, WINDOW_SIZE), 2))
+
+        elif sub_type == "spread":
+            # Violations at opposite ends — hardest for model to detect
+            violation_positions = [
+                random.randint(0, 2),
+                random.randint(WINDOW_SIZE - 3, WINDOW_SIZE - 1)
+            ]
+
+        elif sub_type == "middle":
+            violation_positions = sorted(random.sample(range(3, 7), 2))
+
+        elif sub_type == "triple":
+            # Three violations spread across batch
+            violation_positions = sorted(random.sample(range(WINDOW_SIZE), 3))
+        else:
+            # fallback: random positions
+            violation_positions = sorted(random.sample(range(WINDOW_SIZE), 2))
+
+        # --- 2. Decide the TIME DELTA between violations ---
+        if sub_type == "boundary_time":
+            # Just inside the 300s rule — hardest temporal case
+            total_violation_gap = random.uniform(250.0, 299.9)
+        else:
+            total_violation_gap = random.uniform(10.0, 250.0)
+
+        # --- 3. Build timestamps for the full window ---
+        # Distribute total_violation_gap across the gap between
+        # first and last violation position
+        first_vp = violation_positions[0]
+        last_vp = violation_positions[-1]
+        n_slots = last_vp - first_vp  # number of inter-log gaps to fill
+
+        timestamps = {}
+        t = current_time
+
+        for i in range(WINDOW_SIZE):
+            if i < first_vp:
+                t += random.uniform(1.0, 20.0)  # background noise before violations
+            elif i == first_vp:
+                t += random.uniform(1.0, 10.0)
+                violation_start_time = t
+            elif i > first_vp and i <= last_vp:
+                # Distribute total_violation_gap evenly across slots
+                # with small jitter so it's not mechanical
+                slot_gap = (total_violation_gap / n_slots) + random.uniform(-2.0, 2.0)
+                slot_gap = max(0.5, slot_gap)  # never negative
+                t += slot_gap
+            else:
+                t += random.uniform(1.0, 20.0)  # background noise after violations
+            timestamps[i] = t
+
+        # --- 4. Fill in log entries ---
+        for i in range(WINDOW_SIZE):
+            if i in violation_positions:
+                logs[i] = {
+                    "timestamp": timestamps[i],
+                    "component": target_comp,
+                    "level": random.choice(ERROR_LEVELS)
+                }
+            else:
+                # Background noise — optionally add distractors
+                if sub_type == "multi_comp_distractor" and random.random() < 0.3:
+                    # Other components also show high severity — harder to isolate signal
+                    logs[i] = {
+                        "timestamp": timestamps[i],
+                        "component": random.choice(other_comps),
+                        "level": random.choice(ERROR_LEVELS)
+                    }
+                else:
+                    logs[i] = {
+                        "timestamp": timestamps[i],
+                        "component": random.choice(COMPONENTS),
+                        "level": random.choices(NORMAL_LEVELS, weights=[34, 33, 33])[0]
+                    }
+
+        self.last_ts = timestamps[WINDOW_SIZE - 1]
         return logs
 
 
@@ -201,25 +332,31 @@ def create_balanced_triplets(n_triplets=1000):
         "single_comp_all_good",
     ]
 
-    abnormal_scenarios = ["anomaly", "single_comp_errors"]
 
     for _ in range(n_triplets):
         a_type = random.choice(normal_scenarios)
         p_type = random.choice(normal_scenarios)
-        n_type = random.choice(abnormal_scenarios)
 
         anchor = log_generator.generate_window(scenario=a_type)
         positive = log_generator.generate_window(scenario=p_type)
         #
         # The Negative is always the actual rule violation
-        negative = log_generator.generate_window(scenario=n_type)
+        negative_easy = log_generator.generate_window(scenario="anomaly_easy")
+        negative_medium = log_generator.generate_window(scenario="anomaly_medium")
+        negative_hard = log_generator.generate_window(scenario="anomaly_hard")
+        negative_exterme = log_generator.generate_window(scenario="anomaly_extreme")
+        negative_for_validation = log_generator.generate_window(scenario="anomaly_for_validation")
+
 
         triplets.append(
             {
                 "anchor": anchor,
                 "positive": positive,
-                "negative": negative,
-                "metadata": {"a_type": a_type, "p_type": p_type},
+                "negative_easy": negative_easy,
+                "negative_medium": negative_medium,
+                "negative_hard": negative_hard,
+                "negative_extreme": negative_exterme,
+                "negative_for_validation": negative_for_validation
             }
         )
     return triplets
@@ -229,23 +366,34 @@ def generate_synthetic_logs(batch_count, validation=False):
     dataset = create_balanced_triplets(batch_count)
     anchors = []
     positives = []
-    negatives = []
+    negatives_easy = []
+    negatives_medium = []
+    negatives_hard = []
+    negatives_extreme = []
+    negatives_validation = []
+
     for d in dataset:
         anchors.extend(d["anchor"])
         positives.extend(d["positive"])
-        negatives.extend(d["negative"])
+        negatives_easy.extend(d["negative_easy"])
+        negatives_medium.extend(d["negative_medium"])
+        negatives_hard.extend(d["negative_hard"])
+        negatives_extreme.extend(d["negative_extreme"])
 
     if validation:
         file_path_mapping = {
             "anchors": (anchors, ANCHOR_FILE_PATH_VALID),
             "positive": (positives, POSITIVE_FILE_PATH_VALID),
-            "negative": (negatives, NEGATIVE_FILE_PATH_VALID),
+            "negative_for_validation": (negatives_extreme, NEGATIVE_FILE_PATH_VALID),
         }
     else:
         file_path_mapping = {
             "anchors": (anchors, ANCHOR_FILE_PATH_TRAIN),
             "positive": (positives, POSITIVE_FILE_PATH_TRAIN),
-            "negative": (negatives, NEGATIVE_FILE_PATH_TRAIN),
+            "negative_easy": (negatives_easy, NEGATIVE_FILE_PATH_TRAIN_0),
+            "negative_medium": (negatives_medium, NEGATIVE_FILE_PATH_TRAIN_1),
+            "negative_hard": (negatives_hard, NEGATIVE_FILE_PATH_TRAIN_2),
+            "negative_extreme": (negatives_extreme, NEGATIVE_FILE_PATH_TRAIN_3),
         }
 
 

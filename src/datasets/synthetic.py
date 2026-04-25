@@ -1,8 +1,8 @@
+import numpy as np
 from torch.utils.data import Dataset
 from pathlib import Path
 import pandas as pd
 import torch
-import math
 
 from common.constants import (
     WINDOW_SIZE,
@@ -11,10 +11,10 @@ from common.constants import (
     levels_mapping,
     ANCHOR_FILE_PATH_TRAIN,
     POSITIVE_FILE_PATH_TRAIN,
-    NEGATIVE_FILE_PATH_TRAIN,
+    NEGATIVE_FILE_PATH_TRAIN_0,
     ANCHOR_FILE_PATH_VALID,
     POSITIVE_FILE_PATH_VALID,
-    NEGATIVE_FILE_PATH_VALID,
+    NEGATIVE_FILE_PATH_VALID, NEGATIVE_FILE_PATH_TRAIN_1, NEGATIVE_FILE_PATH_TRAIN_2, NEGATIVE_FILE_PATH_TRAIN_3,
 )
 
 
@@ -29,7 +29,7 @@ class LogDataset(Dataset):
         else:
             delta_ts = current_ts - prev_ts
 
-        log_delta = math.log(1 + delta_ts)  # * 10.0  # amplify this signal
+        log_delta = np.log1p(delta_ts)
         # ensure that the data we are using has monotonically increasing timestamp
         if log_delta < 0:
             assert False
@@ -58,41 +58,77 @@ class LogDataset(Dataset):
 
 class TrainingDataset(LogDataset):
     def __init__(self, for_validation=False):
+        self._validation_dataset = for_validation
         if for_validation:
             anchor_df = pd.read_csv(ANCHOR_FILE_PATH_VALID, comment="#")
             positive_df = pd.read_csv(POSITIVE_FILE_PATH_VALID, comment="#")
-            negative_df = pd.read_csv(NEGATIVE_FILE_PATH_VALID, comment="#")
+            negative_df_0 = pd.read_csv(NEGATIVE_FILE_PATH_VALID, comment="#")
         else:
             anchor_df = pd.read_csv(ANCHOR_FILE_PATH_TRAIN, comment="#")
             positive_df = pd.read_csv(POSITIVE_FILE_PATH_TRAIN, comment="#")
-            negative_df = pd.read_csv(NEGATIVE_FILE_PATH_TRAIN, comment="#")
+            negative_df_0 = pd.read_csv(NEGATIVE_FILE_PATH_TRAIN_0, comment="#")
+            negative_df_1 = pd.read_csv(NEGATIVE_FILE_PATH_TRAIN_1, comment="#")
+            negative_df_2 = pd.read_csv(NEGATIVE_FILE_PATH_TRAIN_2, comment="#")
+            negative_df_3 = pd.read_csv(NEGATIVE_FILE_PATH_TRAIN_3, comment="#")
 
         # each entry is a 2D array of in batches of WINDOW_SIZE log lines
         self.anchors = [
             anchor_df[i : i + WINDOW_SIZE]
             for i in range(0, len(anchor_df), WINDOW_SIZE)
         ]
-
         self.positives = [
             positive_df[i : i + WINDOW_SIZE]
             for i in range(0, len(positive_df), WINDOW_SIZE)
         ]
-        self.negatives = [
-            negative_df[i : i + WINDOW_SIZE]
-            for i in range(0, len(negative_df), WINDOW_SIZE)
+
+        self.negatives_0 = [
+            negative_df_0[i : i + WINDOW_SIZE]
+            for i in range(0, len(negative_df_0), WINDOW_SIZE)
         ]
 
-    def __getitem__(self, index: int):
-        a, p, n = (
-            self.anchors[index],
-            self.positives[index],
-            self.negatives[index],
-        )
+        if not for_validation:
+            self.negatives_1 = [
+                negative_df_1[i : i + WINDOW_SIZE]
+                for i in range(0, len(negative_df_1), WINDOW_SIZE)
+            ]
+            self.negatives_2 = [
+                negative_df_2[i : i + WINDOW_SIZE]
+                for i in range(0, len(negative_df_2), WINDOW_SIZE)
+            ]
+            self.negatives_3 = [
+                negative_df_3[i : i + WINDOW_SIZE]
+                for i in range(0, len(negative_df_3), WINDOW_SIZE)
+            ]
 
-        a_t = self._transform_frames(a)
-        p_t = self._transform_frames(p)
-        n_t = self._transform_frames(n)
-        return a_t, p_t, n_t
+
+    def __getitem__(self, index: int):
+        if self._validation_dataset:
+            a, p, n = (
+                self.anchors[index],
+                self.positives[index],
+                self.negatives_0[index],
+            )
+            a_t = self._transform_frames(a)
+            p_t = self._transform_frames(p)
+            n_t = self._transform_frames(n)
+            return a_t, p_t, n_t
+        else:
+            a, p, n0,n1,n2,n3 = (
+                self.anchors[index],
+                self.positives[index],
+                self.negatives_0[index],
+                self.negatives_1[index],
+                self.negatives_2[index],
+                self.negatives_3[index],
+            )
+
+            a_t = self._transform_frames(a)
+            p_t = self._transform_frames(p)
+            n_t_0 = self._transform_frames(n0)
+            n_t_1 = self._transform_frames(n1)
+            n_t_2 = self._transform_frames(n2)
+            n_t_3 = self._transform_frames(n3)
+            return a_t, p_t, n_t_0,n_t_1,n_t_2,n_t_3
 
     def __len__(self):
         return len(self.anchors)

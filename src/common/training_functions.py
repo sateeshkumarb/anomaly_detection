@@ -1,8 +1,13 @@
 import logging
+import time
+
 import torch
 from tqdm import tqdm
 
 from common.constants import device
+import numpy as np
+
+from sklearn.metrics import roc_auc_score, precision_recall_curve, auc
 
 
 def train_and_save(
@@ -16,9 +21,10 @@ def train_and_save(
     n_epochs=10,
 ):
     model.to(device)
-    best_val_acc = 0.0
+    best_overlap = float("inf")
 
     logging.info("Starting Training and Validation")
+    start = time.time()
 
     for epoch in range(1, n_epochs + 1):
         model.train()
@@ -29,7 +35,18 @@ def train_and_save(
         )
 
         for data_batch in train_progress_bar:
-            anchor, positive, negative = data_batch
+            anchor, positive, n0,n1,n2,n3 = data_batch
+            if epoch<5:
+                negative = n0
+            elif epoch<10:
+                negative = n1
+            elif epoch<15:
+                negative = n2
+            elif epoch<20:
+                negative = n3
+            else:
+                negative = n3
+
             anchor, positive, negative = (
                 anchor.to(device),
                 positive.to(device),
@@ -53,72 +70,76 @@ def train_and_save(
 
         # --- Validation Phase ---
         model.eval()
-        correct_predictions = 0
-        total_pairs = 0
-        running_val_loss = 0.0
-        val_samples_processed = 0
-        val_progress_bar = tqdm(
-            val_loader, desc=f"Epoch {epoch}/{n_epochs} [Validation]", leave=False
-        )
-
-        with torch.no_grad():
-            for data_batch in val_progress_bar:
-                anchor, positive, negative = data_batch
-                anchor, positive, negative = (
-                    anchor.to(device),
-                    positive.to(device),
-                    negative.to(device),
-                )
-
-                anchor_out, pos_out, neg_out = model(anchor, positive, negative)
-                val_loss_item = loss_fcn(anchor_out, pos_out, neg_out)
-
-                # Weight loss by batch size for correct averaging
-                batch_size = anchor.size(0)
-                running_val_loss += val_loss_item.item() * batch_size
-                val_samples_processed += batch_size
-
-                # Accuracy calculation
-                dist_pos = torch.norm(anchor_out - pos_out, p=2, dim=1)
-                dist_neg = torch.norm(anchor_out - neg_out, p=2, dim=1)
-                correct_predictions += torch.sum(dist_pos < dist_neg).item()
-                total_pairs += anchor.size(0)
-
-                # Update running metrics on the progress bar
-                current_acc = (
-                    correct_predictions / total_pairs if total_pairs > 0 else 0
-                )
-                display_loss = running_val_loss / val_samples_processed
-                val_progress_bar.set_postfix(
-                    acc=f"{current_acc:.2%}", loss=f"{display_loss:.4f}"
-                )
-
-        val_accuracy = correct_predictions / total_pairs if total_pairs > 0 else 0
-        val_loss = running_val_loss / len(val_loader.dataset)
-
-        # Print a summary for the epoch
-        current_lr = optimizer.param_groups[0]["lr"]
-        logging.info(
-            f"Epoch {epoch}/{n_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Validation Acc: {val_accuracy:.2%} | LR: {current_lr:.6f}"
-        )
-
-        # Update the learning rate scheduler, if one is provided
+        m = compute_validation_metrics(model, val_loader)
+        logging.info(f"Validation metrics:{m}")
+        overlap_fraction = m["overlap_fraction"]
         if scheduler:
-            scheduler.step(val_loss)
+            scheduler.step(overlap_fraction)
 
         # Save the model if it has the best validation accuracy so far
-        if val_accuracy > best_val_acc:
-            best_val_acc = val_accuracy
+        if overlap_fraction < best_overlap:
+            best_overlap = overlap_fraction
             if save_path is not None:
                 torch.save(model.state_dict(), save_path)
                 logging.info(
-                    f"  -> New best model saved to '{save_path}' with validation accuracy: {best_val_acc:.2%}\n"
+                    f"  -> New best model saved to '{save_path}' with overlap fraction: {best_overlap:.2%}\n"
                 )
 
-    logging.info("Training and Validation Complete")
+    end = time.time()
+    duration = end - start
+    logging.info(f"Training and Validation complete. Took {duration} seconds")
     if save_path:
         logging.info(
-            f"Best model saved to '{save_path}' with accuracy {best_val_acc:.2%}"
+            f"Best model saved to '{save_path}' with overlap fraction {best_overlap:.2%}"
         )
 
     return model
+
+
+def compute_validation_metrics(model, data_loader):
+    model.eval()
+    pos_distances = []
+    neg_distances = []
+    anchor_embeddings = []
+
+    with torch.no_grad():
+        for a,_,_ in data_loader:
+            a = a.to(device)
+            a_emb = model.get_embedding(a).squeeze(-1)
+            anchor_embeddings.append(a_emb.cpu().numpy())
+
+        centroid = np.mean(np.concatenate(anchor_embeddings, axis=0), axis=0)
+        centroid_tensor = torch.tensor(centroid).to(device)
+
+        for _, p, n in data_loader:
+            p = p.to(device)
+            n = n.to(device)
+            p_embeddings = model.get_embedding(p).squeeze(-1)
+            n_embeddings = model.get_embedding(n).squeeze(-1)
+
+            pos_dist = torch.norm(p_embeddings-centroid_tensor,dim=1)
+            neg_dist = torch.norm(n_embeddings-centroid_tensor,dim=1)
+
+            pos_distances.extend(pos_dist.cpu().numpy())
+            neg_distances.extend(neg_dist.cpu().numpy())
+
+        pos_distances = np.array(pos_distances)
+        neg_distances = np.array(neg_distances)
+
+        y_true = np.array([0]*len(pos_distances)+[1]*len(neg_distances))
+        scores = np.concatenate([pos_distances,neg_distances])
+
+        roc_auc = roc_auc_score(y_true,scores)
+        precision,recall,_ = precision_recall_curve(y_true,scores)
+        sorted_indices = np.argsort(recall)
+        pr_auc = auc(recall[sorted_indices],precision[sorted_indices])
+        overlap_fraction = (neg_distances<np.percentile(pos_distances,95)).mean()
+        separation_ratio = neg_distances.mean()/(pos_distances.mean()+1e-8)
+        return {
+            "roc_auc": roc_auc,
+            "pr_auc": pr_auc,
+            "overlap_fraction": overlap_fraction,
+            "separation_ratio": separation_ratio,
+            "pos_mean": pos_distances.mean(),
+            "neg_mean": neg_distances.mean(),
+        }

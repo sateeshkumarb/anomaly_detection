@@ -74,6 +74,10 @@ def infer(
     logging.info(f"classifying logs in file:{file_path}")
     model.infer(state_root_dir, [file_path])
 
+@app.command()
+def show_profile():
+    m_path = "./saved_states/cnn_siamese/model.pth"
+    model.show_profile(m_path)
 
 if __name__ == "__main__":
     app()

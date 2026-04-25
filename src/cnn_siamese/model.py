@@ -5,6 +5,7 @@ import typing
 from pathlib import Path
 
 import torch
+from numpy.ma.core import negative
 from torch import optim
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
@@ -14,6 +15,10 @@ import numpy as np
 from datasets.synthetic import TrainingDataset, InferenceDataset
 from common.constants import component_mapping, levels_mapping, device
 from common.training_functions import train_and_save
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
 
 MODEL_STATE_DIR = "cnn_siamese"
 GOLDEN_DISTANCES_STATE_FILE = "golden_distances.pth"
@@ -146,9 +151,9 @@ def train(state_root_dir: str) -> None:
     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer)
     train_dataset = TrainingDataset(for_validation=False)
-    train_data_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    train_data_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
     validation_dataset = TrainingDataset(for_validation=True)
-    validation_data_loader = DataLoader(validation_dataset, batch_size=32)
+    validation_data_loader = DataLoader(validation_dataset, batch_size=64)
     save_dir = f"{state_root_dir}/{MODEL_STATE_DIR}"
     os.makedirs(save_dir, exist_ok=True)
     model_save_path = f"{save_dir}/{MODEL_SAVE_FILE}"
@@ -160,9 +165,113 @@ def train(state_root_dir: str) -> None:
         optimizer,
         scheduler,
         model_save_path,
-        40,
+        20,
     )
     save_golden_ratios(trained_model, validation_data_loader, save_dir)
+
+def show_profile(model_path):
+    model = SiameseNetwork()
+    model.load_state_dict(torch.load(model_path, map_location="cpu"))
+    model.to(device)
+    model.eval()
+
+    validation_dataset = TrainingDataset(for_validation=True)
+    validation_data_loader = DataLoader(validation_dataset, batch_size=64)
+
+    running_sum = 0.0
+    total_count = 0
+
+    with torch.no_grad():
+        for batch in validation_data_loader:
+            anchor_batch, _,_ = batch
+            logs = anchor_batch.to(device)
+            embeddings = model.get_embedding(logs)  # Shape: [Batch, 512]
+
+            if running_sum is None:
+                running_sum = torch.sum(embeddings, dim=0)
+            else:
+                running_sum += torch.sum(embeddings, dim=0)
+
+            total_count += embeddings.size(0)
+    # Final centroid is the total sum divided by the number of windows
+    centroid = running_sum / total_count
+    centroid_normalized = F.normalize(centroid, dim=0)
+    anchor_centroid = centroid_normalized.unsqueeze(0)
+
+    positive_distances = []
+    negative_distances = []
+    with torch.no_grad():
+        for batch in validation_data_loader:
+            _, p, n = batch
+            p_emb = model.get_embedding(p.to(device))
+            p_dist = torch.norm(p_emb - anchor_centroid, p=2, dim=1)
+            positive_distances.extend(p_dist.cpu().tolist())
+
+            n_emb = model.get_embedding(n.to(device))
+            n_dist = torch.norm(n_emb- anchor_centroid, p=2, dim=1)
+            negative_distances.extend(n_dist.cpu().tolist())
+
+
+    p_mu = np.mean(positive_distances)
+    p_sigma = np.std(positive_distances)
+    p_maximum = np.max(positive_distances)
+    p_99 = np.percentile(positive_distances, 99)
+
+    n_mu = np.mean(negative_distances)
+    n_sigma = np.std(negative_distances)
+    n_minimum = np.min(negative_distances)
+    n_maximum = np.max(negative_distances)
+    n_99 = np.percentile(negative_distances, 99)
+
+    print(f"+ve profile- mean:{p_mu},sigma:{p_sigma},p99:{p_99},max:{p_maximum}")
+    print(f"-ve profile- mean:{n_mu},sigma:{n_sigma},p99:{n_99},min:{n_minimum},max:{n_maximum}")
+
+    positive_distances = np.asarray(positive_distances)
+    negative_distances = np.asarray(negative_distances)
+
+    # --- Plot 1: KDE overlay (best for seeing overlap) ---
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    sns.kdeplot(positive_distances, ax=axes[0], fill=True,
+                color="steelblue", alpha=0.5, label="Positive (normal)")
+    sns.kdeplot(negative_distances, ax=axes[0], fill=True,
+                color="tomato", alpha=0.5, label="Negative (anomalous)")
+
+    # mark the means
+    axes[0].axvline(positive_distances.mean(), color="steelblue",
+                    linestyle="--", linewidth=1.5, label=f"+ve mean: {positive_distances.mean():.3f}")
+    axes[0].axvline(negative_distances.mean(), color="tomato",
+                    linestyle="--", linewidth=1.5, label=f"-ve mean: {negative_distances.mean():.3f}")
+
+    axes[0].set_title("Distance Distribution from Anchor Centroid")
+    axes[0].set_xlabel("Distance")
+    axes[0].set_ylabel("Density")
+    axes[0].legend()
+
+
+    # --- Plot 2: Box plot (best for seeing spread and outliers) ---
+    df = pd.DataFrame({
+        "distance": np.concatenate([positive_distances, negative_distances]),
+        "type": ["Positive (normal)"] * len(positive_distances) +
+                ["Negative (anomalous)"] * len(negative_distances)
+    })
+    sns.boxplot(data=df, x="type", y="distance",
+                palette={"Positive (normal)": "steelblue",
+                         "Negative (anomalous)": "tomato"},
+                ax=axes[1])
+    sns.stripplot(data=df, x="type", y="distance",
+                  palette={"Positive (normal)": "steelblue",
+                           "Negative (anomalous)": "tomato"},
+                  alpha=0.3, size=3, ax=axes[1])  # overlay raw points
+
+    axes[1].set_title("Distance Spread and Outliers")
+    axes[1].set_xlabel("")
+    axes[1].set_ylabel("Distance")
+
+    plt.suptitle("Embedding Space Separation: Normal vs Anomalous",
+                 fontsize=13, fontweight="bold", y=1.02)
+    plt.tight_layout()
+    plt.savefig("distance_distributions.png", dpi=150, bbox_inches="tight")
+    plt.show()
 
 
 def infer(state_root_dir: str, file_paths: typing.List[str]) -> None:
@@ -181,29 +290,28 @@ def infer(state_root_dir: str, file_paths: typing.List[str]) -> None:
 
     for f in file_paths:
         test_dataset = InferenceDataset(Path(f))
-        test_data_loader = DataLoader(test_dataset, batch_size=10)
+        test_data_loader = DataLoader(test_dataset, batch_size=1)
 
         abnormal_count = 0
         normal_count = 0
 
         with torch.no_grad():
-            for batch in test_data_loader:
+            for (i,batch) in enumerate(test_data_loader):
                 batch = batch.to(device)
                 embeddings = model.get_embedding(batch)
                 distances = torch.norm(embeddings - golden_centroid, p=2, dim=1)
-                # print(f"D:{distances.mean()}}")
                 for d in distances:
                     severity = (d - mu) / sigma
                     pred = get_prediction(d, mu, threshold)
                     if pred > 0.5:
-                        logging.info(f"ABNORMAL, pred:{pred},severity:{severity}")
+                        logging.info(f"Batch:{i}:ABNORMAL, anomaly probability:{pred:.4f},severity:{severity:.4f}")
                         abnormal_count += 1
                     else:
-                        logging.info(f"NORMAL,pred:{pred},severity:{severity}")
+                        logging.info(f"Batch:{i}:NORMAL,anomaly probability:{pred:.4f},severity:{severity:.4f}")
                         normal_count += 1
 
             logging.info(
-                f"Abnormal count :{abnormal_count}, Normal count:{normal_count}"
+                f"Abnormal count:{abnormal_count}, Normal count:{normal_count}"
             )
 
 
