@@ -26,9 +26,9 @@ ANOMALY_SUB_TYPE_EASY = {
     "back_loaded":           0.35,
     "middle": 0.15,
     "triple": 0.15,
-    "spread":                0.00,  # highest weight — outliers
-    "boundary_time":         0.00,  # boundary cases
+    "spread":                0.00,
     "multi_comp_distractor": 0.00,
+    "boundary_time":         0.00,
 }
 
 ANOMALY_SUB_TYPE_MEDIUM = {
@@ -36,9 +36,9 @@ ANOMALY_SUB_TYPE_MEDIUM = {
     "back_loaded":           0.25,
     "middle": 0.10,
     "triple": 0.10,
-    "spread":                0.25,  # highest weight — outliers
-    "boundary_time":         0.00,  # boundary cases
+    "spread":                0.25,
     "multi_comp_distractor": 0.05,
+    "boundary_time":         0.00,
 }
 
 ANOMALY_SUB_TYPE_HARD = {
@@ -47,8 +47,8 @@ ANOMALY_SUB_TYPE_HARD = {
     "middle": 0.05,
     "triple": 0.05,
     "spread":                0.30,
-    "boundary_time":         0.20,  # boundary cases
     "multi_comp_distractor": 0.10,
+    "boundary_time":         0.20,
 }
 
 ANOMALY_SUB_TYPE_EXTREME = {
@@ -57,25 +57,19 @@ ANOMALY_SUB_TYPE_EXTREME = {
     "middle": 0.03,
     "triple": 0.02,
     "spread":                0.35,
-    "boundary_time":         0.25,  # boundary cases
     "multi_comp_distractor": 0.15,
+    "boundary_time":         0.25,
 }
 
 ANOMALY_SUB_TYPE_FOR_VALIDATION = {
-    "front_loaded":          0.15,
-    "back_loaded":           0.15,
-    "middle": 0.15,
-    "triple": 0.15,
-    "spread":                0.15,
-    "boundary_time":         0.15,  # boundary cases
+    "front_loaded":          0.05,
+    "back_loaded":           0.05,
+    "middle": 0.05,
+    "triple": 0.05,
+    "spread":                0.40,
     "multi_comp_distractor": 0.10,
+    "boundary_time":         0.30,
 }
-
-
-
-
-
-
 
 class SyntheticLogGenerator:
     def __init__(self, start_time=None):
@@ -118,6 +112,8 @@ class SyntheticLogGenerator:
                         "level": random.choices(ALL_LEVELS, weights=[70, 20, 5, 3, 2])[
                             0
                         ],
+                        # field not used for training but only to analyze the training dataset mix
+                        # "synthetic_type": scenario,
                     }
                 )
             elif scenario == "healthy_level":
@@ -159,11 +155,9 @@ class SyntheticLogGenerator:
                 if i == pattern_start:
                     lvl = random.choices(ERROR_LEVELS, weights=[70, 30])[0]
                     comp = target_comp
-                    gap = random.uniform(1.0, 5.0)
                 elif i == pattern_start + 1:
                     lvl = random.choices(ERROR_LEVELS, weights=[60, 40])[0]
                     comp = random.choice(other_comps)  # Different Component
-                    gap = random.uniform(0.1, 3.0)  # Very fast, but different comp
                 logs.append(
                     {"timestamp": current_time, "component": comp, "level": lvl}
                 )
@@ -173,11 +167,9 @@ class SyntheticLogGenerator:
                 if i == pattern_start:
                     lvl = random.choices(ERROR_LEVELS, weights=[70, 30])[0]
                     comp = target_comp
-                    gap = random.uniform(1.0, 5.0)  # Random entry
                 if i == pattern_start + 1:
                     lvl = random.choices(ERROR_LEVELS, weights=[60, 40])[0]
                     comp = target_comp
-                    gap = random.uniform(301.0, 600.0)  # normal gap > 300.0
                 logs.append(
                     {"timestamp": current_time, "component": comp, "level": lvl}
                 )
@@ -187,35 +179,39 @@ class SyntheticLogGenerator:
                 logs.append(
                     {"timestamp": current_time, "component": comp, "level": lvl}
                 )
-            elif scenario == "anomaly_easy":
-                sub_type = random.choices(
-                    list(ANOMALY_SUB_TYPE_EASY.keys()),
-                    weights=list(ANOMALY_SUB_TYPE_EASY.values())
-                )[0]
-                return self._generate_anomaly_window(sub_type)
-            elif scenario == "anomaly_medium":
-                sub_type = random.choices(
-                    list(ANOMALY_SUB_TYPE_MEDIUM.keys()),
-                    weights=list(ANOMALY_SUB_TYPE_MEDIUM.values())
-                )[0]
-                return self._generate_anomaly_window(sub_type)
-            elif scenario == "anomaly_hard":
-                sub_type = random.choices(
-                    list(ANOMALY_SUB_TYPE_HARD.keys()),
-                    weights=list(ANOMALY_SUB_TYPE_HARD.values())
-                )[0]
-                return self._generate_anomaly_window(sub_type)
-            elif scenario == "anomaly_extreme":
-                sub_type = random.choices(
-                    list(ANOMALY_SUB_TYPE_EXTREME.keys()),
-                    weights=list(ANOMALY_SUB_TYPE_EXTREME.values())
-                )[0]
-                return self._generate_anomaly_window(sub_type)
-            elif scenario == "anomaly_for_validation":
-                sub_type = random.choices(
-                    list(ANOMALY_SUB_TYPE_FOR_VALIDATION.keys()),
-                    weights=list(ANOMALY_SUB_TYPE_FOR_VALIDATION.values())
-                )[0]
+            elif scenario.startswith("anomaly_"):
+                if scenario == "anomaly_easy":
+                    sub_type = random.choices(
+                        list(ANOMALY_SUB_TYPE_EASY.keys()),
+                        weights=list(ANOMALY_SUB_TYPE_EASY.values())
+                    )[0]
+                elif scenario == "anomaly_medium":
+                    sub_type = random.choices(
+                        list(ANOMALY_SUB_TYPE_MEDIUM.keys()),
+                        weights=list(ANOMALY_SUB_TYPE_MEDIUM.values())
+                    )[0]
+                elif scenario == "anomaly_hard":
+                    sub_type = random.choices(
+                        list(ANOMALY_SUB_TYPE_HARD.keys()),
+                        weights=list(ANOMALY_SUB_TYPE_HARD.values())
+                    )[0]
+                elif scenario == "anomaly_extreme":
+                    sub_type = random.choices(
+                        list(ANOMALY_SUB_TYPE_EXTREME.keys()),
+                        weights=list(ANOMALY_SUB_TYPE_EXTREME.values())
+                    )[0]
+                elif scenario == "anomaly_for_validation":
+                    sub_type = random.choices(
+                        list(ANOMALY_SUB_TYPE_FOR_VALIDATION.keys()),
+                        weights=list(ANOMALY_SUB_TYPE_FOR_VALIDATION.values())
+                    )[0]
+                else:
+                    # default to EASY
+                    sub_type = random.choices(
+                        list(ANOMALY_SUB_TYPE_EASY.keys()),
+                        weights=list(ANOMALY_SUB_TYPE_EASY.values())
+                    )[0]
+
                 return self._generate_anomaly_window(sub_type)
 
 
@@ -280,7 +276,6 @@ class SyntheticLogGenerator:
                 t += random.uniform(1.0, 20.0)  # background noise before violations
             elif i == first_vp:
                 t += random.uniform(1.0, 10.0)
-                violation_start_time = t
             elif i > first_vp and i <= last_vp:
                 # Distribute total_violation_gap evenly across slots
                 # with small jitter so it's not mechanical
@@ -306,13 +301,13 @@ class SyntheticLogGenerator:
                     logs[i] = {
                         "timestamp": timestamps[i],
                         "component": random.choice(other_comps),
-                        "level": random.choice(ERROR_LEVELS)
+                        "level": random.choice(ERROR_LEVELS),
                     }
                 else:
                     logs[i] = {
                         "timestamp": timestamps[i],
                         "component": random.choice(COMPONENTS),
-                        "level": random.choices(NORMAL_LEVELS, weights=[34, 33, 33])[0]
+                        "level": random.choices(NORMAL_LEVELS, weights=[34, 33, 33])[0],
                     }
 
         self.last_ts = timestamps[WINDOW_SIZE - 1]
@@ -344,7 +339,7 @@ def create_balanced_triplets(n_triplets=1000):
         negative_easy = log_generator.generate_window(scenario="anomaly_easy")
         negative_medium = log_generator.generate_window(scenario="anomaly_medium")
         negative_hard = log_generator.generate_window(scenario="anomaly_hard")
-        negative_exterme = log_generator.generate_window(scenario="anomaly_extreme")
+        negative_extreme = log_generator.generate_window(scenario="anomaly_extreme")
         negative_for_validation = log_generator.generate_window(scenario="anomaly_for_validation")
 
 
@@ -355,7 +350,7 @@ def create_balanced_triplets(n_triplets=1000):
                 "negative_easy": negative_easy,
                 "negative_medium": negative_medium,
                 "negative_hard": negative_hard,
-                "negative_extreme": negative_exterme,
+                "negative_extreme": negative_extreme,
                 "negative_for_validation": negative_for_validation
             }
         )
@@ -370,7 +365,6 @@ def generate_synthetic_logs(batch_count, validation=False):
     negatives_medium = []
     negatives_hard = []
     negatives_extreme = []
-    negatives_validation = []
 
     for d in dataset:
         anchors.extend(d["anchor"])

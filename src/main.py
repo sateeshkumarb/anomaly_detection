@@ -75,9 +75,16 @@ def infer(
     model.infer(state_root_dir, [file_path])
 
 @app.command()
-def show_profile():
-    m_path = "./saved_states/cnn_siamese/model.pth"
-    model.show_profile(m_path)
+def generate_plots(state_root_dir: Annotated[
+        str,
+        typer.Argument(
+            help="root directory to read the saved model and the related configuration"
+        ),
+    ] = None,):
+    """Generate plots (box showing distance spread and outliers from validation dataset compared to the anchor centroid."""
+    if state_root_dir is None:
+        state_root_dir = get_root_directory()
+    model.generate_plots(state_root_dir)
 
 if __name__ == "__main__":
     app()

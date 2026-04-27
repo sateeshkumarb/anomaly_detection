@@ -5,7 +5,6 @@ import typing
 from pathlib import Path
 
 import torch
-from numpy.ma.core import negative
 from torch import optim
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
@@ -88,7 +87,11 @@ class SiameseNetwork(nn.Module):
         return self.embedding_network(x)
 
 
-def save_golden_ratios(model:torch.nn.Module, golden_dataloader:torch.utils.data.DataLoader, dir_to_save_state:str):
+def save_golden_ratios(
+    model: torch.nn.Module,
+    golden_dataloader: torch.utils.data.DataLoader,
+    dir_to_save_state: str,
+):
     model.eval()
 
     running_sum = None
@@ -151,9 +154,11 @@ def train(state_root_dir: str) -> None:
     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer)
     train_dataset = TrainingDataset(for_validation=False)
-    train_data_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+    train_data_loader = DataLoader(
+        train_dataset, batch_size=32, shuffle=True, num_workers=4
+    )
     validation_dataset = TrainingDataset(for_validation=True)
-    validation_data_loader = DataLoader(validation_dataset, batch_size=64)
+    validation_data_loader = DataLoader(validation_dataset, batch_size=32)
     save_dir = f"{state_root_dir}/{MODEL_STATE_DIR}"
     os.makedirs(save_dir, exist_ok=True)
     model_save_path = f"{save_dir}/{MODEL_SAVE_FILE}"
@@ -165,38 +170,22 @@ def train(state_root_dir: str) -> None:
         optimizer,
         scheduler,
         model_save_path,
-        20,
+        40,
     )
     save_golden_ratios(trained_model, validation_data_loader, save_dir)
 
-def show_profile(model_path):
+
+def generate_plots(state_root_dir: str):
+    load_dir = f"{state_root_dir}/{MODEL_STATE_DIR}"
+    model_path = f"{load_dir}/{MODEL_SAVE_FILE}"
     model = SiameseNetwork()
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
     model.to(device)
     model.eval()
 
     validation_dataset = TrainingDataset(for_validation=True)
-    validation_data_loader = DataLoader(validation_dataset, batch_size=64)
-
-    running_sum = 0.0
-    total_count = 0
-
-    with torch.no_grad():
-        for batch in validation_data_loader:
-            anchor_batch, _,_ = batch
-            logs = anchor_batch.to(device)
-            embeddings = model.get_embedding(logs)  # Shape: [Batch, 512]
-
-            if running_sum is None:
-                running_sum = torch.sum(embeddings, dim=0)
-            else:
-                running_sum += torch.sum(embeddings, dim=0)
-
-            total_count += embeddings.size(0)
-    # Final centroid is the total sum divided by the number of windows
-    centroid = running_sum / total_count
-    centroid_normalized = F.normalize(centroid, dim=0)
-    anchor_centroid = centroid_normalized.unsqueeze(0)
+    validation_data_loader = DataLoader(validation_dataset, batch_size=32)
+    anchor_centroid = torch.load(f"{load_dir}/{GOLDEN_CENTROID_STATE_FILE}")
 
     positive_distances = []
     negative_distances = []
@@ -208,9 +197,8 @@ def show_profile(model_path):
             positive_distances.extend(p_dist.cpu().tolist())
 
             n_emb = model.get_embedding(n.to(device))
-            n_dist = torch.norm(n_emb- anchor_centroid, p=2, dim=1)
+            n_dist = torch.norm(n_emb - anchor_centroid, p=2, dim=1)
             negative_distances.extend(n_dist.cpu().tolist())
-
 
     p_mu = np.mean(positive_distances)
     p_sigma = np.std(positive_distances)
@@ -223,52 +211,114 @@ def show_profile(model_path):
     n_maximum = np.max(negative_distances)
     n_99 = np.percentile(negative_distances, 99)
 
-    print(f"+ve profile- mean:{p_mu},sigma:{p_sigma},p99:{p_99},max:{p_maximum}")
-    print(f"-ve profile- mean:{n_mu},sigma:{n_sigma},p99:{n_99},min:{n_minimum},max:{n_maximum}")
+    logging.info(f"+ve profile- mean:{p_mu},sigma:{p_sigma},p99:{p_99},max:{p_maximum}")
+    logging.info(
+        f"-ve profile- mean:{n_mu},sigma:{n_sigma},p99:{n_99},min:{n_minimum},max:{n_maximum}"
+    )
 
     positive_distances = np.asarray(positive_distances)
     negative_distances = np.asarray(negative_distances)
 
-    # --- Plot 1: KDE overlay (best for seeing overlap) ---
+    # --- Plot 1: KDE overlay (viewing overlap) ---
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    sns.kdeplot(positive_distances, ax=axes[0], fill=True,
-                color="steelblue", alpha=0.5, label="Positive (normal)")
-    sns.kdeplot(negative_distances, ax=axes[0], fill=True,
-                color="tomato", alpha=0.5, label="Negative (anomalous)")
+    sns.kdeplot(
+        positive_distances,
+        ax=axes[0],
+        fill=True,
+        color="steelblue",
+        alpha=0.5,
+        label="Positive (normal)",
+    )
+    sns.kdeplot(
+        negative_distances,
+        ax=axes[0],
+        fill=True,
+        color="tomato",
+        alpha=0.5,
+        label="Negative (anomalous)",
+    )
 
     # mark the means
-    axes[0].axvline(positive_distances.mean(), color="steelblue",
-                    linestyle="--", linewidth=1.5, label=f"+ve mean: {positive_distances.mean():.3f}")
-    axes[0].axvline(negative_distances.mean(), color="tomato",
-                    linestyle="--", linewidth=1.5, label=f"-ve mean: {negative_distances.mean():.3f}")
+    axes[0].axvline(
+        positive_distances.mean(),
+        color="steelblue",
+        linestyle="--",
+        linewidth=1.5,
+        label=f"+ve mean: {positive_distances.mean():.3f}",
+    )
+    axes[0].axvline(
+        negative_distances.mean(),
+        color="tomato",
+        linestyle="--",
+        linewidth=1.5,
+        label=f"-ve mean: {negative_distances.mean():.3f}",
+    )
 
     axes[0].set_title("Distance Distribution from Anchor Centroid")
     axes[0].set_xlabel("Distance")
     axes[0].set_ylabel("Density")
     axes[0].legend()
 
+    # --- Plot 2: Box plot (best for viewing spread and outliers) ---
+    df = pd.DataFrame(
+        {
+            "distance": np.concatenate([positive_distances, negative_distances]),
+            "type": ["Positive (normal)"] * len(positive_distances)
+            + ["Negative (anomalous)"] * len(negative_distances),
+        }
+    )
+    sns.boxplot(
+        data=df,
+        x="type",
+        y="distance",
+        palette={"Positive (normal)": "steelblue", "Negative (anomalous)": "tomato"},
+        showfliers=False,
+        ax=axes[1],
+    )
+    sns.stripplot(
+        data=df,
+        x="type",
+        y="distance",
+        palette={"Positive (normal)": "steelblue", "Negative (anomalous)": "tomato"},
+        alpha=0.4,
+        size=4,
+        jitter=True,
+        ax=axes[1],
+    )  # overlay raw points
 
-    # --- Plot 2: Box plot (best for seeing spread and outliers) ---
-    df = pd.DataFrame({
-        "distance": np.concatenate([positive_distances, negative_distances]),
-        "type": ["Positive (normal)"] * len(positive_distances) +
-                ["Negative (anomalous)"] * len(negative_distances)
-    })
-    sns.boxplot(data=df, x="type", y="distance",
-                palette={"Positive (normal)": "steelblue",
-                         "Negative (anomalous)": "tomato"},
-                ax=axes[1])
-    sns.stripplot(data=df, x="type", y="distance",
-                  palette={"Positive (normal)": "steelblue",
-                           "Negative (anomalous)": "tomato"},
-                  alpha=0.3, size=3, ax=axes[1])  # overlay raw points
+    # TODO: better understand this
+    neg_outlier_threshold = np.percentile(
+        positive_distances, 95
+    )  # negatives below this are outliers
+    pos_outlier_threshold = np.percentile(
+        negative_distances, 10
+    )  # positives above this are outliers
+
+    n_neg_outliers = (negative_distances < neg_outlier_threshold).sum()
+    n_pos_outliers = (positive_distances > pos_outlier_threshold).sum()
+
+    for label, distances, x_pos, outlier_count in [
+        ("Positive (normal)", positive_distances, 0, n_pos_outliers),
+        ("Negative (anomalous)", negative_distances, 1, n_neg_outliers),
+    ]:
+        axes[1].text(
+            x=x_pos,
+            y=2.1,
+            s=f"n={len(distances)}\noutliers={outlier_count}",
+            ha="center",
+            fontsize=9,
+        )
 
     axes[1].set_title("Distance Spread and Outliers")
     axes[1].set_xlabel("")
     axes[1].set_ylabel("Distance")
 
-    plt.suptitle("Embedding Space Separation: Normal vs Anomalous",
-                 fontsize=13, fontweight="bold", y=1.02)
+    plt.suptitle(
+        "Embedding Space Separation: Normal vs Anomalous",
+        fontsize=13,
+        fontweight="bold",
+        y=1.02,
+    )
     plt.tight_layout()
     plt.savefig("distance_distributions.png", dpi=150, bbox_inches="tight")
     plt.show()
@@ -296,7 +346,7 @@ def infer(state_root_dir: str, file_paths: typing.List[str]) -> None:
         normal_count = 0
 
         with torch.no_grad():
-            for (i,batch) in enumerate(test_data_loader):
+            for i, batch in enumerate(test_data_loader):
                 batch = batch.to(device)
                 embeddings = model.get_embedding(batch)
                 distances = torch.norm(embeddings - golden_centroid, p=2, dim=1)
@@ -304,10 +354,14 @@ def infer(state_root_dir: str, file_paths: typing.List[str]) -> None:
                     severity = (d - mu) / sigma
                     pred = get_prediction(d, mu, threshold)
                     if pred > 0.5:
-                        logging.info(f"Batch:{i}:ABNORMAL, anomaly probability:{pred:.4f},severity:{severity:.4f}")
+                        logging.info(
+                            f"Batch:{i}:ABNORMAL, anomaly probability:{pred:.4f},severity:{severity:.4f}"
+                        )
                         abnormal_count += 1
                     else:
-                        logging.info(f"Batch:{i}:NORMAL,anomaly probability:{pred:.4f},severity:{severity:.4f}")
+                        logging.info(
+                            f"Batch:{i}:NORMAL,anomaly probability:{pred:.4f},severity:{severity:.4f}"
+                        )
                         normal_count += 1
 
             logging.info(
@@ -315,7 +369,7 @@ def infer(state_root_dir: str, file_paths: typing.List[str]) -> None:
             )
 
 
-def get_prediction(dist:float, mu:float, threshold:float) -> float:
+def get_prediction(dist: float, mu: float, threshold: float) -> float:
     # If distance is near or below the mean, probability is near 0
     if dist <= mu:
         return 0.0

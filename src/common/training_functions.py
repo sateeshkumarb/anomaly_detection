@@ -22,6 +22,7 @@ def train_and_save(
 ):
     model.to(device)
     best_overlap = float("inf")
+    best_separation_ratio = 0.0
 
     logging.info("Starting Training and Validation")
     start = time.time()
@@ -66,23 +67,34 @@ def train_and_save(
             # Update the progress bar with the running average loss
             display_loss = running_train_loss / train_samples_processed
             train_progress_bar.set_postfix(loss=f"{display_loss:.4f}")
-        train_loss = running_train_loss / len(train_loader.dataset)
 
         # --- Validation Phase ---
         model.eval()
         m = compute_validation_metrics(model, val_loader)
         logging.info(f"Validation metrics:{m}")
         overlap_fraction = m["overlap_fraction"]
+        separation_ratio = m["separation_ratio"]
         if scheduler:
             scheduler.step(overlap_fraction)
 
-        # Save the model if it has the best validation accuracy so far
+        # Save the model if it has the best overlap fraction so far
+        # lesser the overlap better it is
         if overlap_fraction < best_overlap:
             best_overlap = overlap_fraction
+            best_separation_ratio = separation_ratio
             if save_path is not None:
                 torch.save(model.state_dict(), save_path)
                 logging.info(
-                    f"  -> New best model saved to '{save_path}' with overlap fraction: {best_overlap:.2%}\n"
+                    f"  -> New best model saved to '{save_path}' with overlap fraction: {best_overlap:.4f}, separation ratio:{best_separation_ratio:.4f}\n"
+                )
+        elif (overlap_fraction == best_overlap) and (separation_ratio > best_separation_ratio):
+            best_overlap = overlap_fraction
+            best_separation_ratio = separation_ratio
+            if save_path is not None:
+                torch.save(model.state_dict(), save_path)
+                logging.info("using separation ratio as criteria to save")
+                logging.info(
+                    f"  -> New best model saved to '{save_path}' with overlap fraction: {best_overlap:.4f}, separation ratio:{best_separation_ratio:.4f}\n"
                 )
 
     end = time.time()
@@ -90,7 +102,7 @@ def train_and_save(
     logging.info(f"Training and Validation complete. Took {duration} seconds")
     if save_path:
         logging.info(
-            f"Best model saved to '{save_path}' with overlap fraction {best_overlap:.2%}"
+            f" Best model saved to '{save_path}' with overlap fraction: {best_overlap:.4f}, separation ratio:{best_separation_ratio:.4f}\n"
         )
 
     return model
