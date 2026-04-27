@@ -99,7 +99,7 @@ def save_golden_ratios(
 
     with torch.no_grad():
         for batch in golden_dataloader:
-            _, golden_batch, _ = batch
+            golden_batch, _, _ = batch
             logs = golden_batch.to(device)
             embeddings = model.get_embedding(logs)  # Shape: [Batch, 512]
 
@@ -304,7 +304,9 @@ def generate_plots(state_root_dir: str):
         axes[1].text(
             x=x_pos,
             y=2.1,
-            s=f"n={len(distances)}\noutliers={outlier_count}",
+            # s=f"n={len(distances)}\noutliers={outlier_count}",
+            # TODO: include outlier count too in the plot
+            s=f"n={len(distances)}",
             ha="center",
             fontsize=9,
         )
@@ -315,9 +317,9 @@ def generate_plots(state_root_dir: str):
 
     plt.suptitle(
         "Embedding Space Separation: Normal vs Anomalous",
-        fontsize=13,
+        fontsize=20,
         fontweight="bold",
-        y=1.02,
+        y=0.95,
     )
     plt.tight_layout()
     plt.savefig("distance_distributions.png", dpi=150, bbox_inches="tight")

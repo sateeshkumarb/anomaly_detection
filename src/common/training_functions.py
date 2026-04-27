@@ -36,14 +36,14 @@ def train_and_save(
         )
 
         for data_batch in train_progress_bar:
-            anchor, positive, n0,n1,n2,n3 = data_batch
-            if epoch<5:
+            anchor, positive, n0, n1, n2, n3 = data_batch
+            if epoch < 5:
                 negative = n0
-            elif epoch<10:
+            elif epoch < 10:
                 negative = n1
-            elif epoch<15:
+            elif epoch < 15:
                 negative = n2
-            elif epoch<20:
+            elif epoch < 20:
                 negative = n3
             else:
                 negative = n3
@@ -87,7 +87,9 @@ def train_and_save(
                 logging.info(
                     f"  -> New best model saved to '{save_path}' with overlap fraction: {best_overlap:.4f}, separation ratio:{best_separation_ratio:.4f}\n"
                 )
-        elif (overlap_fraction == best_overlap) and (separation_ratio > best_separation_ratio):
+        elif (overlap_fraction == best_overlap) and (
+            separation_ratio > best_separation_ratio
+        ):
             best_overlap = overlap_fraction
             best_separation_ratio = separation_ratio
             if save_path is not None:
@@ -115,7 +117,7 @@ def compute_validation_metrics(model, data_loader):
     anchor_embeddings = []
 
     with torch.no_grad():
-        for a,_,_ in data_loader:
+        for a, _, _ in data_loader:
             a = a.to(device)
             a_emb = model.get_embedding(a).squeeze(-1)
             anchor_embeddings.append(a_emb.cpu().numpy())
@@ -129,8 +131,8 @@ def compute_validation_metrics(model, data_loader):
             p_embeddings = model.get_embedding(p).squeeze(-1)
             n_embeddings = model.get_embedding(n).squeeze(-1)
 
-            pos_dist = torch.norm(p_embeddings-centroid_tensor,dim=1)
-            neg_dist = torch.norm(n_embeddings-centroid_tensor,dim=1)
+            pos_dist = torch.norm(p_embeddings - centroid_tensor, dim=1)
+            neg_dist = torch.norm(n_embeddings - centroid_tensor, dim=1)
 
             pos_distances.extend(pos_dist.cpu().numpy())
             neg_distances.extend(neg_dist.cpu().numpy())
@@ -138,15 +140,15 @@ def compute_validation_metrics(model, data_loader):
         pos_distances = np.array(pos_distances)
         neg_distances = np.array(neg_distances)
 
-        y_true = np.array([0]*len(pos_distances)+[1]*len(neg_distances))
-        scores = np.concatenate([pos_distances,neg_distances])
+        y_true = np.array([0] * len(pos_distances) + [1] * len(neg_distances))
+        scores = np.concatenate([pos_distances, neg_distances])
 
-        roc_auc = roc_auc_score(y_true,scores)
-        precision,recall,_ = precision_recall_curve(y_true,scores)
+        roc_auc = roc_auc_score(y_true, scores)
+        precision, recall, _ = precision_recall_curve(y_true, scores)
         sorted_indices = np.argsort(recall)
-        pr_auc = auc(recall[sorted_indices],precision[sorted_indices])
-        overlap_fraction = (neg_distances<np.percentile(pos_distances,95)).mean()
-        separation_ratio = neg_distances.mean()/(pos_distances.mean()+1e-8)
+        pr_auc = auc(recall[sorted_indices], precision[sorted_indices])
+        overlap_fraction = (neg_distances < np.percentile(pos_distances, 95)).mean()
+        separation_ratio = neg_distances.mean() / (pos_distances.mean() + 1e-8)
         return {
             "roc_auc": roc_auc,
             "pr_auc": pr_auc,

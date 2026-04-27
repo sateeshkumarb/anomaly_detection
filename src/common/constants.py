@@ -32,10 +32,10 @@ DATASET_ROOT = f"{PROJECT_ROOT}/data/synthetic"
 
 ANCHOR_FILE_PATH_TRAIN = Path(f"{DATASET_ROOT}/anchors_train.csv")
 POSITIVE_FILE_PATH_TRAIN = Path(f"{DATASET_ROOT}/positives_train.csv")
-NEGATIVE_FILE_PATH_TRAIN_0 = Path(f"{DATASET_ROOT}/negatives_train_0.csv")
-NEGATIVE_FILE_PATH_TRAIN_1 = Path(f"{DATASET_ROOT}/negatives_train_1.csv")
-NEGATIVE_FILE_PATH_TRAIN_2 = Path(f"{DATASET_ROOT}/negatives_train_2.csv")
-NEGATIVE_FILE_PATH_TRAIN_3 = Path(f"{DATASET_ROOT}/negatives_train_3.csv")
+NEGATIVE_FILE_PATH_TRAIN_0 = Path(f"{DATASET_ROOT}/negatives_train_easy.csv")
+NEGATIVE_FILE_PATH_TRAIN_1 = Path(f"{DATASET_ROOT}/negatives_train_medium.csv")
+NEGATIVE_FILE_PATH_TRAIN_2 = Path(f"{DATASET_ROOT}/negatives_train_hard.csv")
+NEGATIVE_FILE_PATH_TRAIN_3 = Path(f"{DATASET_ROOT}/negatives_train_extreme.csv")
 
 ANCHOR_FILE_PATH_VALID = Path(f"{DATASET_ROOT}/anchors_valid.csv")
 POSITIVE_FILE_PATH_VALID = Path(f"{DATASET_ROOT}/positives_valid.csv")

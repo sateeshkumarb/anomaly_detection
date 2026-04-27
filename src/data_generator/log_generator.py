@@ -22,54 +22,55 @@ from common.constants import (
 )
 
 ANOMALY_SUB_TYPE_EASY = {
-    "front_loaded":          0.35,
-    "back_loaded":           0.35,
+    "front_loaded": 0.35,
+    "back_loaded": 0.35,
     "middle": 0.15,
     "triple": 0.15,
-    "spread":                0.00,
+    "spread": 0.00,
     "multi_comp_distractor": 0.00,
-    "boundary_time":         0.00,
+    "boundary_time": 0.00,
 }
 
 ANOMALY_SUB_TYPE_MEDIUM = {
-    "front_loaded":          0.25,
-    "back_loaded":           0.25,
+    "front_loaded": 0.25,
+    "back_loaded": 0.25,
     "middle": 0.10,
     "triple": 0.10,
-    "spread":                0.25,
+    "spread": 0.25,
     "multi_comp_distractor": 0.05,
-    "boundary_time":         0.00,
+    "boundary_time": 0.00,
 }
 
 ANOMALY_SUB_TYPE_HARD = {
-    "front_loaded":          0.15,
-    "back_loaded":           0.15,
+    "front_loaded": 0.15,
+    "back_loaded": 0.15,
     "middle": 0.05,
     "triple": 0.05,
-    "spread":                0.30,
+    "spread": 0.30,
     "multi_comp_distractor": 0.10,
-    "boundary_time":         0.20,
+    "boundary_time": 0.20,
 }
 
 ANOMALY_SUB_TYPE_EXTREME = {
-    "front_loaded":          0.10,
-    "back_loaded":           0.10,
+    "front_loaded": 0.10,
+    "back_loaded": 0.10,
     "middle": 0.03,
     "triple": 0.02,
-    "spread":                0.35,
+    "spread": 0.35,
     "multi_comp_distractor": 0.15,
-    "boundary_time":         0.25,
+    "boundary_time": 0.25,
 }
 
 ANOMALY_SUB_TYPE_FOR_VALIDATION = {
-    "front_loaded":          0.05,
-    "back_loaded":           0.05,
+    "front_loaded": 0.05,
+    "back_loaded": 0.05,
     "middle": 0.05,
     "triple": 0.05,
-    "spread":                0.40,
+    "spread": 0.40,
     "multi_comp_distractor": 0.10,
-    "boundary_time":         0.30,
+    "boundary_time": 0.30,
 }
+
 
 class SyntheticLogGenerator:
     def __init__(self, start_time=None):
@@ -183,37 +184,36 @@ class SyntheticLogGenerator:
                 if scenario == "anomaly_easy":
                     sub_type = random.choices(
                         list(ANOMALY_SUB_TYPE_EASY.keys()),
-                        weights=list(ANOMALY_SUB_TYPE_EASY.values())
+                        weights=list(ANOMALY_SUB_TYPE_EASY.values()),
                     )[0]
                 elif scenario == "anomaly_medium":
                     sub_type = random.choices(
                         list(ANOMALY_SUB_TYPE_MEDIUM.keys()),
-                        weights=list(ANOMALY_SUB_TYPE_MEDIUM.values())
+                        weights=list(ANOMALY_SUB_TYPE_MEDIUM.values()),
                     )[0]
                 elif scenario == "anomaly_hard":
                     sub_type = random.choices(
                         list(ANOMALY_SUB_TYPE_HARD.keys()),
-                        weights=list(ANOMALY_SUB_TYPE_HARD.values())
+                        weights=list(ANOMALY_SUB_TYPE_HARD.values()),
                     )[0]
                 elif scenario == "anomaly_extreme":
                     sub_type = random.choices(
                         list(ANOMALY_SUB_TYPE_EXTREME.keys()),
-                        weights=list(ANOMALY_SUB_TYPE_EXTREME.values())
+                        weights=list(ANOMALY_SUB_TYPE_EXTREME.values()),
                     )[0]
                 elif scenario == "anomaly_for_validation":
                     sub_type = random.choices(
                         list(ANOMALY_SUB_TYPE_FOR_VALIDATION.keys()),
-                        weights=list(ANOMALY_SUB_TYPE_FOR_VALIDATION.values())
+                        weights=list(ANOMALY_SUB_TYPE_FOR_VALIDATION.values()),
                     )[0]
                 else:
                     # default to EASY
                     sub_type = random.choices(
                         list(ANOMALY_SUB_TYPE_EASY.keys()),
-                        weights=list(ANOMALY_SUB_TYPE_EASY.values())
+                        weights=list(ANOMALY_SUB_TYPE_EASY.values()),
                     )[0]
 
                 return self._generate_anomaly_window(sub_type)
-
 
         self.last_ts = current_time
         return logs
@@ -241,7 +241,7 @@ class SyntheticLogGenerator:
             # Violations at opposite ends — hardest for model to detect
             violation_positions = [
                 random.randint(0, 2),
-                random.randint(WINDOW_SIZE - 3, WINDOW_SIZE - 1)
+                random.randint(WINDOW_SIZE - 3, WINDOW_SIZE - 1),
             ]
 
         elif sub_type == "middle":
@@ -292,7 +292,7 @@ class SyntheticLogGenerator:
                 logs[i] = {
                     "timestamp": timestamps[i],
                     "component": target_comp,
-                    "level": random.choice(ERROR_LEVELS)
+                    "level": random.choice(ERROR_LEVELS),
                 }
             else:
                 # Background noise — optionally add distractors
@@ -327,7 +327,6 @@ def create_balanced_triplets(n_triplets=1000):
         "single_comp_all_good",
     ]
 
-
     for _ in range(n_triplets):
         a_type = random.choice(normal_scenarios)
         p_type = random.choice(normal_scenarios)
@@ -340,8 +339,9 @@ def create_balanced_triplets(n_triplets=1000):
         negative_medium = log_generator.generate_window(scenario="anomaly_medium")
         negative_hard = log_generator.generate_window(scenario="anomaly_hard")
         negative_extreme = log_generator.generate_window(scenario="anomaly_extreme")
-        negative_for_validation = log_generator.generate_window(scenario="anomaly_for_validation")
-
+        negative_for_validation = log_generator.generate_window(
+            scenario="anomaly_for_validation"
+        )
 
         triplets.append(
             {
@@ -351,7 +351,7 @@ def create_balanced_triplets(n_triplets=1000):
                 "negative_medium": negative_medium,
                 "negative_hard": negative_hard,
                 "negative_extreme": negative_extreme,
-                "negative_for_validation": negative_for_validation
+                "negative_for_validation": negative_for_validation,
             }
         )
     return triplets
@@ -389,7 +389,6 @@ def generate_synthetic_logs(batch_count, validation=False):
             "negative_hard": (negatives_hard, NEGATIVE_FILE_PATH_TRAIN_2),
             "negative_extreme": (negatives_extreme, NEGATIVE_FILE_PATH_TRAIN_3),
         }
-
 
     for v in file_path_mapping.values():
         dfp = pd.DataFrame(v[0])

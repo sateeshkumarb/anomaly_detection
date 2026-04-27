@@ -74,17 +74,22 @@ def infer(
     logging.info(f"classifying logs in file:{file_path}")
     model.infer(state_root_dir, [file_path])
 
+
 @app.command()
-def generate_plots(state_root_dir: Annotated[
+def show_plots(
+    state_root_dir: Annotated[
         str,
         typer.Argument(
             help="root directory to read the saved model and the related configuration"
         ),
-    ] = None,):
-    """Generate plots (box showing distance spread and outliers from validation dataset compared to the anchor centroid."""
+    ] = None,
+):
+    """Generate and show Kernel Density Estimation (KDE) and box plots using the trained model. These models show distance spread and outliers of samples in validation dataset compared to the
+    anchor Centroid."""
     if state_root_dir is None:
         state_root_dir = get_root_directory()
     model.generate_plots(state_root_dir)
+
 
 if __name__ == "__main__":
     app()

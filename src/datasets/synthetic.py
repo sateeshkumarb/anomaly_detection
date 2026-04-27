@@ -14,7 +14,10 @@ from common.constants import (
     NEGATIVE_FILE_PATH_TRAIN_0,
     ANCHOR_FILE_PATH_VALID,
     POSITIVE_FILE_PATH_VALID,
-    NEGATIVE_FILE_PATH_VALID, NEGATIVE_FILE_PATH_TRAIN_1, NEGATIVE_FILE_PATH_TRAIN_2, NEGATIVE_FILE_PATH_TRAIN_3,
+    NEGATIVE_FILE_PATH_VALID,
+    NEGATIVE_FILE_PATH_TRAIN_1,
+    NEGATIVE_FILE_PATH_TRAIN_2,
+    NEGATIVE_FILE_PATH_TRAIN_3,
 )
 
 
@@ -100,7 +103,6 @@ class TrainingDataset(LogDataset):
                 for i in range(0, len(negative_df_3), WINDOW_SIZE)
             ]
 
-
     def __getitem__(self, index: int):
         if self._validation_dataset:
             a, p, n = (
@@ -113,7 +115,7 @@ class TrainingDataset(LogDataset):
             n_t = self._transform_frames(n)
             return a_t, p_t, n_t
         else:
-            a, p, n0,n1,n2,n3 = (
+            a, p, n0, n1, n2, n3 = (
                 self.anchors[index],
                 self.positives[index],
                 self.negatives_0[index],
@@ -128,7 +130,7 @@ class TrainingDataset(LogDataset):
             n_t_1 = self._transform_frames(n1)
             n_t_2 = self._transform_frames(n2)
             n_t_3 = self._transform_frames(n3)
-            return a_t, p_t, n_t_0,n_t_1,n_t_2,n_t_3
+            return a_t, p_t, n_t_0, n_t_1, n_t_2, n_t_3
 
     def __len__(self):
         return len(self.anchors)
