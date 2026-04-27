@@ -76,7 +76,13 @@ def infer(
 
 
 @app.command()
-def show_plots(
+def visualize_separation(
+    plot: Annotated[
+        str,
+        typer.Argument(
+            help="draw plots visualizing separation between normal and anomalous samples in validation dataset."
+        ),
+    ] = "all",
     state_root_dir: Annotated[
         str,
         typer.Argument(
@@ -84,11 +90,26 @@ def show_plots(
         ),
     ] = None,
 ):
-    """Generate and show Kernel Density Estimation (KDE) and box plots using the trained model. These models show distance spread and outliers of samples in validation dataset compared to the
-    anchor Centroid."""
+    """Generate plots visualizing separation between normal and anomalous samples in the validation dataset.
+    Valid values for the parameter 'plot' are:
+    - distribution: shows the distance distribution (box + stripplot)
+    - embedding: shows the embedding space (t-sne)
+    - all: generates both (default)
+    """
     if state_root_dir is None:
         state_root_dir = get_root_directory()
-    model.generate_plots(state_root_dir)
+
+    plot = plot.strip().lower()
+    if plot not in ["distribution", "embedding", "all"]:
+        logging.info(f"invalid argument {plot} for parameter plot. Defaulting to 'all'")
+
+    if plot == "distribution":
+        model.plot_distances(state_root_dir)
+    elif plot == "embedding":
+        model.plot_embeddings(state_root_dir)
+    else:
+        model.plot_distances(state_root_dir)
+        model.plot_embeddings(state_root_dir)
 
 
 if __name__ == "__main__":

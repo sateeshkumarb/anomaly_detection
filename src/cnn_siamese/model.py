@@ -11,13 +11,10 @@ import torch.nn.functional as F
 import torch.nn as nn
 import numpy as np
 
+from common.visualizations import distance_distribution, tsne
 from datasets.synthetic import TrainingDataset, InferenceDataset
 from common.constants import component_mapping, levels_mapping, device
-from common.training_functions import train_and_save
-
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
+from common.training_functions import train_and_save, get_anchor_centroid
 
 MODEL_STATE_DIR = "cnn_siamese"
 GOLDEN_DISTANCES_STATE_FILE = "golden_distances.pth"
@@ -92,36 +89,29 @@ def save_golden_ratios(
     golden_dataloader: torch.utils.data.DataLoader,
     dir_to_save_state: str,
 ):
-    model.eval()
-
-    running_sum = None
-    total_count = 0
-
-    with torch.no_grad():
-        for batch in golden_dataloader:
-            golden_batch, _, _ = batch
-            logs = golden_batch.to(device)
-            embeddings = model.get_embedding(logs)  # Shape: [Batch, 512]
-
-            if running_sum is None:
-                running_sum = torch.sum(embeddings, dim=0)
-            else:
-                running_sum += torch.sum(embeddings, dim=0)
-
-            total_count += embeddings.size(0)
-    # Final centroid is the total sum divided by the number of windows
-    centroid = running_sum / total_count
-    centroid_normalized = F.normalize(centroid, dim=0)
-    golden_centroid = centroid_normalized.unsqueeze(0)
+    golden_centroid = get_anchor_centroid(model, golden_dataloader)
     torch.save(golden_centroid, f"{dir_to_save_state}/{GOLDEN_CENTROID_STATE_FILE}")
 
+    model.eval()
     golden_distances = []
     with torch.no_grad():
         for batch in golden_dataloader:
             _, golden, _ = batch
+            # model already returns normalized embeddings, hence no need to normalize
+            # these embeddings while computing L2 distance from the anchor centroid
             emb = model.get_embedding(golden.to(device))
-            # Calculate distance to pre-computed golden centroid
-            dist = torch.norm(emb - golden_centroid, p=2, dim=1)
+            # guard against any change in the model code and normalization isn't done anymore
+            assert torch.allclose(
+                torch.linalg.vector_norm(emb, ord=2, dim=1),
+                torch.ones(emb.size(0), device=device),
+                atol=1e-5,
+            ), "Embeddings are not unit normalised — check model forward"
+
+            # Calculate L2 distance to pre-computed golden centroid
+            # for each sample in the batch.
+            # L2 distance is calculated as:
+            # distance = sqrt(sum((emb[i] - centroid) ^ 2))
+            dist = torch.linalg.vector_norm(emb - golden_centroid, ord=2, dim=1)
             golden_distances.extend(dist.cpu().tolist())
 
     # Statistical Profile of "Normal"
@@ -175,13 +165,19 @@ def train(state_root_dir: str) -> None:
     save_golden_ratios(trained_model, validation_data_loader, save_dir)
 
 
-def generate_plots(state_root_dir: str):
+def _load_model(state_root_dir: str) -> nn.Module:
     load_dir = f"{state_root_dir}/{MODEL_STATE_DIR}"
     model_path = f"{load_dir}/{MODEL_SAVE_FILE}"
     model = SiameseNetwork()
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
     model.to(device)
     model.eval()
+    return model
+
+
+def plot_distances(state_root_dir: str):
+    load_dir = f"{state_root_dir}/{MODEL_STATE_DIR}"
+    model = _load_model(state_root_dir)
 
     validation_dataset = TrainingDataset(for_validation=True)
     validation_data_loader = DataLoader(validation_dataset, batch_size=32)
@@ -193,11 +189,11 @@ def generate_plots(state_root_dir: str):
         for batch in validation_data_loader:
             _, p, n = batch
             p_emb = model.get_embedding(p.to(device))
-            p_dist = torch.norm(p_emb - anchor_centroid, p=2, dim=1)
+            p_dist = torch.linalg.vector_norm(p_emb - anchor_centroid, ord=2, dim=1)
             positive_distances.extend(p_dist.cpu().tolist())
 
             n_emb = model.get_embedding(n.to(device))
-            n_dist = torch.norm(n_emb - anchor_centroid, p=2, dim=1)
+            n_dist = torch.linalg.vector_norm(n_emb - anchor_centroid, ord=2, dim=1)
             negative_distances.extend(n_dist.cpu().tolist())
 
     p_mu = np.mean(positive_distances)
@@ -218,112 +214,35 @@ def generate_plots(state_root_dir: str):
 
     positive_distances = np.asarray(positive_distances)
     negative_distances = np.asarray(negative_distances)
+    distance_distribution(positive_distances, negative_distances)
 
-    # --- Plot 1: KDE overlay (viewing overlap) ---
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    sns.kdeplot(
-        positive_distances,
-        ax=axes[0],
-        fill=True,
-        color="steelblue",
-        alpha=0.5,
-        label="Positive (normal)",
-    )
-    sns.kdeplot(
-        negative_distances,
-        ax=axes[0],
-        fill=True,
-        color="tomato",
-        alpha=0.5,
-        label="Negative (anomalous)",
-    )
 
-    # mark the means
-    axes[0].axvline(
-        positive_distances.mean(),
-        color="steelblue",
-        linestyle="--",
-        linewidth=1.5,
-        label=f"+ve mean: {positive_distances.mean():.3f}",
-    )
-    axes[0].axvline(
-        negative_distances.mean(),
-        color="tomato",
-        linestyle="--",
-        linewidth=1.5,
-        label=f"-ve mean: {negative_distances.mean():.3f}",
-    )
+def plot_embeddings(state_root_dir: str):
+    model = _load_model(state_root_dir)
 
-    axes[0].set_title("Distance Distribution from Anchor Centroid")
-    axes[0].set_xlabel("Distance")
-    axes[0].set_ylabel("Density")
-    axes[0].legend()
+    validation_dataset = TrainingDataset(for_validation=True)
+    validation_data_loader = DataLoader(validation_dataset, batch_size=32)
 
-    # --- Plot 2: Box plot (best for viewing spread and outliers) ---
-    df = pd.DataFrame(
-        {
-            "distance": np.concatenate([positive_distances, negative_distances]),
-            "type": ["Positive (normal)"] * len(positive_distances)
-            + ["Negative (anomalous)"] * len(negative_distances),
-        }
-    )
-    sns.boxplot(
-        data=df,
-        x="type",
-        y="distance",
-        palette={"Positive (normal)": "steelblue", "Negative (anomalous)": "tomato"},
-        showfliers=False,
-        ax=axes[1],
-    )
-    sns.stripplot(
-        data=df,
-        x="type",
-        y="distance",
-        palette={"Positive (normal)": "steelblue", "Negative (anomalous)": "tomato"},
-        alpha=0.4,
-        size=4,
-        jitter=True,
-        ax=axes[1],
-    )  # overlay raw points
+    embeddings = []
+    labels = []
+    with torch.no_grad():
+        for anchor, positive, negative in validation_data_loader:
+            anchor_emb = model.get_embedding(anchor.to(device)).squeeze(-1)
+            positive_emb = model.get_embedding(positive.to(device)).squeeze(-1)
+            negative_emb = model.get_embedding(negative.to(device)).squeeze(-1)
 
-    # TODO: better understand this
-    neg_outlier_threshold = np.percentile(
-        positive_distances, 95
-    )  # negatives below this are outliers
-    pos_outlier_threshold = np.percentile(
-        negative_distances, 10
-    )  # positives above this are outliers
+            batch_size = anchor.size(0)
+            embeddings.append(anchor_emb.cpu().numpy())
+            embeddings.append(positive_emb.cpu().numpy())
+            embeddings.append(negative_emb.cpu().numpy())
 
-    n_neg_outliers = (negative_distances < neg_outlier_threshold).sum()
-    n_pos_outliers = (positive_distances > pos_outlier_threshold).sum()
+            labels.extend(["Anchor (normal)"] * batch_size)
+            labels.extend(["Positive (normal)"] * batch_size)
+            labels.extend(["Negative (anomalous)"] * batch_size)
 
-    for label, distances, x_pos, outlier_count in [
-        ("Positive (normal)", positive_distances, 0, n_pos_outliers),
-        ("Negative (anomalous)", negative_distances, 1, n_neg_outliers),
-    ]:
-        axes[1].text(
-            x=x_pos,
-            y=2.1,
-            # s=f"n={len(distances)}\noutliers={outlier_count}",
-            # TODO: include outlier count too in the plot
-            s=f"n={len(distances)}",
-            ha="center",
-            fontsize=9,
-        )
-
-    axes[1].set_title("Distance Spread and Outliers")
-    axes[1].set_xlabel("")
-    axes[1].set_ylabel("Distance")
-
-    plt.suptitle(
-        "Embedding Space Separation: Normal vs Anomalous",
-        fontsize=20,
-        fontweight="bold",
-        y=0.95,
-    )
-    plt.tight_layout()
-    plt.savefig("distance_distributions.png", dpi=150, bbox_inches="tight")
-    plt.show()
+    embeddings = np.concatenate(embeddings, axis=0)
+    labels = np.array(labels)
+    tsne(embeddings, labels)
 
 
 def infer(state_root_dir: str, file_paths: typing.List[str]) -> None:
@@ -334,11 +253,7 @@ def infer(state_root_dir: str, file_paths: typing.List[str]) -> None:
 
     mu, sigma, threshold = vals["mu"], vals["sigma"], vals["threshold_99"]
     golden_centroid = torch.load(f"{load_dir}/{GOLDEN_CENTROID_STATE_FILE}")
-    model_load_path = f"{load_dir}/{MODEL_SAVE_FILE}"
-    model = SiameseNetwork()
-    model.load_state_dict(torch.load(model_load_path, map_location="cpu"))
-    model.to(device)
-    model.eval()
+    model = _load_model(state_root_dir)
 
     for f in file_paths:
         test_dataset = InferenceDataset(Path(f))
@@ -351,8 +266,11 @@ def infer(state_root_dir: str, file_paths: typing.List[str]) -> None:
             for i, batch in enumerate(test_data_loader):
                 batch = batch.to(device)
                 embeddings = model.get_embedding(batch)
-                distances = torch.norm(embeddings - golden_centroid, p=2, dim=1)
+                distances = torch.linalg.vector_norm(
+                    embeddings - golden_centroid, ord=2, dim=1
+                )
                 for d in distances:
+                    # z-score. How many standard deviations the batch distance is from the normal mean.
                     severity = (d - mu) / sigma
                     pred = get_prediction(d, mu, threshold)
                     if pred > 0.5:
@@ -372,21 +290,18 @@ def infer(state_root_dir: str, file_paths: typing.List[str]) -> None:
 
 
 def get_prediction(dist: float, mu: float, threshold: float) -> float:
+    # dist: L2 norm of distance of embeddings of given batch of logs from normalized anchor centroid.
+    # mu: mean of L2 norm of distance of embeddings of +ve samples (of validation set) from normalized anchor centroid.
+    # threshold: 99th percentile of vector norm of distance of the embeddings of +ve samples (of validation set)
+    # from normalized anchor centroid.
     # If distance is near or below the mean, probability is near 0
     if dist <= mu:
         return 0.0
 
-    # Calculate how far past the 'Normal' mean we are
-    # This scales the probability so that reaching the 'threshold' is ~50%
-    # and doubling the threshold is ~99%
+    # if dist = threshold. we are outer edge of what can be considered normal. The probability evaluates
+    # to ~0.5
     scaled_dist = (dist - mu) / (threshold - mu)
-    # TODO: stronger reasoning to use -0.7 or should we use some other val as constant ?
-    # 0.7 because 1 - exp(-0.7) ~= 0.5
-    # Don't hardcode 0.7 forever. After you calculate your mu and sigma from
-    # the 10k golden lines, run one "Known Bad" batch (your negative logs)
-    # through the function.  If the probability for the bad logs is lower
-    # than 95%, increase the constant (e.g., to 1.0).  If your golden logs
-    # are getting scores higher than 10%, decrease the constant (e.g., to
-    # 0.5) or check if your mu is too low (TODO)
-    prob = 1 - torch.exp(-0.7 * scaled_dist)  # 0.7 is a tuning constant (sensitivity)
+    # 0.7: exp(-0.7) ~= 0.5. So when scaled dist is 1 (which happens when dist = threshold) probability
+    # will be 0.5 As the difference increases probability will also scale accordingly
+    prob = 1 - torch.exp(-0.7 * scaled_dist)
     return prob.item()

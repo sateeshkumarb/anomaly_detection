@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 from common.constants import device
 import numpy as np
-
+import torch.nn.functional as F
 from sklearn.metrics import roc_auc_score, precision_recall_curve, auc
 
 
@@ -110,29 +110,47 @@ def train_and_save(
     return model
 
 
-def compute_validation_metrics(model, data_loader):
+def get_anchor_centroid(model, data_loader):
     model.eval()
-    pos_distances = []
-    neg_distances = []
     anchor_embeddings = []
-
     with torch.no_grad():
         for a, _, _ in data_loader:
             a = a.to(device)
             a_emb = model.get_embedding(a).squeeze(-1)
             anchor_embeddings.append(a_emb.cpu().numpy())
+            # embeddings are already unit norm from model forward
+            # assert to catch any changes, so that it is caught during development itself.
+            assert torch.allclose(
+                torch.linalg.vector_norm(a_emb, ord=2, dim=1),
+                torch.ones(a_emb.size(0), device=device),
+                atol=1e-5,
+            ), "Embeddings are not unit normalised — check model forward"
 
-        centroid = np.mean(np.concatenate(anchor_embeddings, axis=0), axis=0)
-        centroid_tensor = torch.tensor(centroid).to(device)
+    centroid = np.mean(np.concatenate(anchor_embeddings, axis=0), axis=0)
+    centroid_tensor = torch.tensor(centroid).to(device)
+    centroid_tensor_n = F.normalize(centroid_tensor, dim=0)
+    return centroid_tensor_n.unsqueeze(0)
 
+
+def compute_validation_metrics(model, data_loader):
+    model.eval()
+    pos_distances = []
+    neg_distances = []
+    anchor_centroid_n = get_anchor_centroid(model, data_loader)
+
+    with torch.no_grad():
         for _, p, n in data_loader:
             p = p.to(device)
             n = n.to(device)
             p_embeddings = model.get_embedding(p).squeeze(-1)
             n_embeddings = model.get_embedding(n).squeeze(-1)
 
-            pos_dist = torch.norm(p_embeddings - centroid_tensor, dim=1)
-            neg_dist = torch.norm(n_embeddings - centroid_tensor, dim=1)
+            pos_dist = torch.linalg.vector_norm(
+                p_embeddings - anchor_centroid_n, ord=2, dim=1
+            )
+            neg_dist = torch.linalg.vector_norm(
+                n_embeddings - anchor_centroid_n, ord=2, dim=1
+            )
 
             pos_distances.extend(pos_dist.cpu().numpy())
             neg_distances.extend(neg_dist.cpu().numpy())
