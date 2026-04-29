@@ -25,7 +25,7 @@ MODEL_SAVE_FILE = "model.pth"
 
 class EmbeddingNetwork(nn.Module):
 
-    def __init__(self, raw_field_count, embedding_dim=8):
+    def __init__(self, raw_field_count, embedding_dim=8, pool_size=1):
         super(EmbeddingNetwork, self).__init__()
 
         # 1. Define Embeddings only for Categorical fields
@@ -39,7 +39,8 @@ class EmbeddingNetwork(nn.Module):
         self.cnn = nn.Sequential(
             # layer-1
             # kernel_size: how many lines to look for (convolution)
-            # output shape: [batch_size, out_channels, (input_channels-kernel_size+1)] when padding=0
+            # input shape : [batch_size, input_channels, seq_length]
+            # output shape: [batch_size, out_channels, (seq_length-kernel_size+1)] when padding=0
             nn.Conv1d(
                 in_channels=input_channels, out_channels=64, kernel_size=5, padding=0
             ),
@@ -50,9 +51,10 @@ class EmbeddingNetwork(nn.Module):
             # layer-3
             nn.Conv1d(in_channels=128, out_channels=256, kernel_size=5, padding=2),
             nn.ReLU(),
-            nn.AdaptiveMaxPool1d(1),
+            nn.AdaptiveMaxPool1d(pool_size),
             nn.Flatten(),  # this doesn't change the data (only the format of it)
-            nn.Linear(256, 64),
+            # if there was no pooling in_features: 256*sequence_length after last Conv1d
+            nn.Linear(256 * pool_size, 64),
         )
 
     def forward(self, x):
